@@ -8,12 +8,14 @@ API REST con:
 - Webhook para ManyChat (POST /webhook/manychat)
 - Endpoint de estadísticas semanales para el dashboard
 """
+import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, date, timedelta
 from typing import Optional
 
-from fastapi import FastAPI, Depends, HTTPException
+import httpx
+from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -22,6 +24,13 @@ from sqlalchemy.orm import Session
 from database import get_db, crear_tablas
 from models import Cancha, Reserva, EstadoReserva
 from seed import seed
+
+logger = logging.getLogger(__name__)
+
+N8N_WEBHOOK_URL = os.getenv(
+    "N8N_WEBHOOK_URL",
+    "https://n8n-production-2d53.up.railway.app/webhook/nueva-reserva",
+)
 
 
 @asynccontextmanager
@@ -143,7 +152,7 @@ def listar_reservas(
 
 
 @app.post("/reservas", status_code=201)
-def crear_reserva(data: ReservaCreate, db: Session = Depends(get_db)):
+def crear_reserva(data: ReservaCreate, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     # Verificar que la cancha existe
     cancha = db.query(Cancha).filter(Cancha.id == data.cancha_id).first()
     if not cancha:
@@ -194,6 +203,7 @@ def crear_reserva(data: ReservaCreate, db: Session = Depends(get_db)):
     db.add(reserva)
     db.commit()
     db.refresh(reserva)
+    background_tasks.add_task(_notificar_n8n, reserva, cancha)
     return _serializar_reserva(reserva)
 
 
@@ -232,7 +242,7 @@ def cancelar_reserva(reserva_id: int, db: Session = Depends(get_db)):
 # ── Webhook ManyChat ───────────────────────────────────────────────────────────
 
 @app.post("/webhook/manychat")
-def webhook_manychat(payload: ManyChатWebhook, db: Session = Depends(get_db)):
+def webhook_manychat(payload: ManyChатWebhook, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """
     Recibe una reserva desde ManyChat y la registra en la base de datos.
     Retorna set_attributes para ManyChat (confirma el turno al usuario).
@@ -302,6 +312,7 @@ def webhook_manychat(payload: ManyChатWebhook, db: Session = Depends(get_db)):
     db.add(reserva)
     db.commit()
     db.refresh(reserva)
+    background_tasks.add_task(_notificar_n8n, reserva, cancha)
 
     return {
         "version": "v2",
@@ -380,6 +391,25 @@ def estadisticas_semana(db: Session = Depends(get_db)):
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _notificar_n8n(reserva: Reserva, cancha: Cancha) -> None:
+    """Dispara el webhook de n8n en background. Si falla, no rompe la reserva."""
+    payload = {
+        "reserva_id":       reserva.id,
+        "cliente_nombre":   reserva.cliente_nombre,
+        "cliente_telefono": reserva.cliente_telefono,
+        "cancha":           cancha.nombre,
+        "fecha":            reserva.fecha.strftime("%d/%m/%Y"),
+        "hora":             reserva.fecha.strftime("%H:%M"),
+        "duracion_minutos": reserva.duracion_minutos,
+        "canal_origen":     reserva.canal_origen,
+    }
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            client.post(N8N_WEBHOOK_URL, json=payload)
+    except Exception as exc:
+        logger.warning("n8n webhook falló (reserva #%s): %s", reserva.id, exc)
+
 
 def _serializar_reserva(r: Reserva) -> dict:
     return {
