@@ -1,0 +1,90 @@
+{
+  "name": "Pádel Pablo · Notificación de nueva reserva",
+  "nodes": [
+    {
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "Webhook - Nueva Reserva",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nueva-reserva",
+        "responseMode": "responseNode",
+        "options": {}
+      }
+    },
+    {
+      "id": "a1b2c3d4-0001-0001-0001-000000000002",
+      "name": "Formatear Mensaje Telegram",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [500, 300],
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "fields": {
+          "values": [
+            {
+              "name": "mensaje_pablo",
+              "type": "string",
+              "value": "=🎾 <b>Nueva reserva!</b>\n\nCliente: {{ $json.cliente_nombre }}\nTeléfono: {{ $json.cliente_telefono }}\nCancha: {{ $json.cancha }}\nFecha: {{ $json.fecha }}\nHora: {{ $json.hora }}\nDuración: {{ $json.duracion_minutos }} min\nOrigen: {{ $json.canal_origen }}\nCódigo: #{{ $json.reserva_id }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a1b2c3d4-0001-0001-0001-000000000003",
+      "name": "Telegram a Pablo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [750, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: $json.mensaje_pablo, parse_mode: 'HTML' }) }}"
+      }
+    },
+    {
+      "id": "a1b2c3d4-0001-0001-0001-000000000005",
+      "name": "Responder Webhook OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1000, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "{\"ok\": true, \"notificacion\": \"enviada\"}"
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Nueva Reserva": {
+      "main": [[
+        {"node": "Formatear Mensaje Telegram", "type": "main", "index": 0}
+      ]]
+    },
+    "Formatear Mensaje Telegram": {
+      "main": [[
+        {"node": "Telegram a Pablo", "type": "main", "index": 0}
+      ]]
+    },
+    "Telegram a Pablo": {
+      "main": [[
+        {"node": "Responder Webhook OK", "type": "main", "index": 0}
+      ]]
+    }
+  },
+  "settings": {"executionOrder": "v1"},
+  "_meta": {
+    "descripcion": "Se dispara cuando se crea una nueva reserva. Envía mensaje Telegram a Pablo.",
+    "variables_requeridas": [
+      "TELEGRAM_BOT_TOKEN",
+      "TELEGRAM_CHAT_ID"
+    ],
+    "como_conectar": "En el backend (main.py), agregar una llamada HTTP a este webhook despues de crear una reserva exitosa.",
+    "como_obtener_credenciales": "1. Crear bot con @BotFather en Telegram → obtener TELEGRAM_BOT_TOKEN. 2. Iniciar chat con el bot y llamar a https://api.telegram.org/bot{TOKEN}/getUpdates para obtener el chat_id de Pablo."
+  }
+}

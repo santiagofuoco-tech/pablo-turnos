@@ -1,0 +1,81 @@
+{
+  "name": "Pádel Pablo · Reporte semanal por Telegram",
+  "nodes": [
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000001",
+      "name": "Schedule - Lunes 9am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 300],
+      "parameters": {
+        "rule": {
+          "interval": [{"field": "cronExpression", "expression": "0 9 * * 1"}]
+        }
+      }
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000002",
+      "name": "Obtener estadísticas semanales",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [500, 300],
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.API_BASE_URL }}/estadisticas/semana"
+      }
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000003",
+      "name": "Formatear reporte",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [750, 300],
+      "parameters": {
+        "mode": "manual",
+        "fields": {
+          "values": [
+            {
+              "name": "reporte_texto",
+              "type": "string",
+              "value": "=📊 <b>Reporte semanal · Canchas Pádel Pablo</b>\nSemana: {{ $json.semana }}\n\n🎾 <b>Total reservas:</b> {{ $json.total_reservas }}\n\n<b>Por cancha:</b>\n{{ $json.por_cancha.map(c => `• ${c.cancha}: ${c.reservas} turnos`).join('\\n') }}\n\n<b>Por día:</b>\n{{ $json.por_dia.map(d => `• ${d.dia}: ${d.reservas}`).join('\\n') }}\n\n⏰ <b>Hora pico:</b> {{ $json.horas_pico[0]?.hora || '-' }} hs ({{ $json.horas_pico[0]?.reservas || 0 }} reservas)\n\n<i>Generado automáticamente por Gestion-AI</i>"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "c3d4e5f6-0003-0003-0003-000000000004",
+      "name": "Enviar reporte Telegram a Pablo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1000, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://api.telegram.org/bot{{ $env.TELEGRAM_BOT_TOKEN }}/sendMessage",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={{ JSON.stringify({ chat_id: $env.TELEGRAM_CHAT_ID, text: $json.reporte_texto, parse_mode: 'HTML' }) }}"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule - Lunes 9am": {
+      "main": [[{"node": "Obtener estadísticas semanales", "type": "main", "index": 0}]]
+    },
+    "Obtener estadísticas semanales": {
+      "main": [[{"node": "Formatear reporte", "type": "main", "index": 0}]]
+    },
+    "Formatear reporte": {
+      "main": [[{"node": "Enviar reporte Telegram a Pablo", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {"executionOrder": "v1"},
+  "_meta": {
+    "descripcion": "Corre todos los lunes a las 9am. Obtiene las estadisticas semanales del backend y envia un reporte por Telegram a Pablo.",
+    "variables_requeridas": [
+      "API_BASE_URL",
+      "TELEGRAM_BOT_TOKEN",
+      "TELEGRAM_CHAT_ID"
+    ]
+  }
+}
